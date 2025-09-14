@@ -1,0 +1,246 @@
+# ==============================================================================
+# SuperAI - AGI Research Environment Orchestration
+#
+# 13大核心微服务，支持未来扩展，保留自定义参数与最佳实践
+# ==============================================================================
+services:
+  vllm-service:
+    build:
+      context: ./microservices/vllm-service
+      dockerfile: Dockerfile
+    container_name: vllm-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - vllm-models:/root/.cache/vllm
+      - ./models/Qwen1.5-1.8B-Chat:/models/Qwen1.5-1.8B-Chat
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: --model /models/Qwen1.5-1.8B-Chat --host 0.0.0.0
+    networks:
+      - agi-internal
+
+  agi-qwen-service:
+    build:
+      context: .
+      dockerfile: ./microservices/agi-qwen-service/Dockerfile.agi
+    container_name: agi-qwen-service
+    ports:
+      - "8201:8200"
+    environment:
+      - SERVICE_NAME=agi-qwen-service
+      - SERVICE_PORT=8200
+      - REDIS_HOST=agi-redis-lb
+      - VLLM_API_URL=http://vllm-service:8000/v1/chat/completions
+      - VLLM_MODEL=Qwen/Qwen1.5-1.8B-Chat
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8200/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - vllm-service
+    volumes:
+      - ./scripts:/app/scripts
+    networks:
+      - agi-internal
+
+  agi-qwen-lb:
+    build:
+      context: ./microservices/agi-qwen-lb
+      dockerfile: Dockerfile
+    container_name: agi-qwen-lb
+    ports:
+      - "8202:80"
+    depends_on:
+      - agi-qwen-service
+    networks:
+      - agi-public
+      - agi-internal
+
+  agi-synergy-api-lb:
+    build:
+      context: ./microservices/agi-synergy-api-lb
+      dockerfile: Dockerfile
+    container_name: agi-synergy-api-lb
+    ports:
+      - "8199:80"
+    depends_on:
+      - agent-executor
+    environment:
+      - SERVICE_NAME=synergy-api-lb
+    networks:
+      - agi-public
+      - agi-internal
+
+  agi-learning-api-lb:
+    build:
+      context: ./microservices/agi-learning-api-lb
+      dockerfile: Dockerfile
+    container_name: agi-learning-api-lb
+    ports:
+      - "8200:80"
+    environment:
+      - SERVICE_NAME=learning-api-lb
+    networks:
+      - agi-public
+      - agi-internal
+
+  health-check-proxy:
+    build:
+      context: ./microservices/health-check-proxy
+      dockerfile: Dockerfile
+    container_name: health-check-proxy
+    ports:
+      - "8105:80"
+    environment:
+      - SERVICE_NAME=health-check-proxy
+    networks:
+      - agi-public
+      - agi-internal
+
+  agi-prometheus:
+    image: prom/prometheus:latest
+    container_name: agi-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+    networks:
+      - agi-internal
+
+  agi-grafana:
+    image: grafana/grafana:latest
+    container_name: agi-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - agi-prometheus
+    networks:
+      - agi-internal
+
+  agi-redis-lb:
+    image: redis:7-alpine
+    container_name: agi-redis-lb
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - agi-internal
+
+  agi-evolution-manager:
+    build:
+      context: .
+      dockerfile: ./microservices/agi-evolution-manager/Dockerfile.agi
+    container_name: agi-evolution-manager
+    environment:
+      - SERVICE_NAME=evolution-manager
+      - REDIS_HOST=agi-redis-lb
+    networks:
+      - agi-internal
+
+  agi-v4-enhanced:
+    build:
+      context: ./microservices/agi-v4-enhanced
+      dockerfile: Dockerfile.agi
+    container_name: agi-v4-enhanced
+    environment:
+      - SERVICE_NAME=v4-enhanced
+    networks:
+      - agi-internal
+
+  agi-test-validation:
+    build:
+      context: ./microservices/agi-test-validation
+      dockerfile: Dockerfile
+    container_name: agi-test-validation
+    environment:
+      - SERVICE_NAME=test-validation
+    networks:
+      - agi-internal
+
+  agi-comprehensive-monitoring-enhanced:
+    build:
+      context: ./microservices/agi-comprehensive-monitoring-enhanced
+      dockerfile: Dockerfile
+    container_name: agi-comprehensive-monitoring-enhanced
+    environment:
+      - SERVICE_NAME=comprehensive-monitoring
+    networks:
+      - agi-internal
+
+  agent-planner:
+    build:
+      context: .
+      dockerfile: ./microservices/agent-planner/Dockerfile.agi
+    container_name: agent-planner
+    working_dir: /app/microservices/agent-planner
+    ports:
+      - "8300:8300"
+    environment:
+      - SERVICE_NAME=agent-planner
+      - SERVICE_PORT=8300
+      - REDIS_HOST=agi-redis-lb
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8300/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - ./scripts:/app/scripts
+    networks:
+      - agi-internal
+
+  agent-executor:
+    build:
+      context: .
+      dockerfile: ./microservices/agent-executor/Dockerfile.agi
+    container_name: agent-executor
+    ports:
+      - "8400:8400"
+    environment:
+      - SERVICE_NAME=agent-executor
+      - SERVICE_PORT=8400
+      - REDIS_HOST=agi-redis-lb
+      - VLLM_API_URL=http://vllm-service:8000/v1/chat/completions
+      - VLLM_MODEL=Qwen/Qwen1.5-1.8B-Chat
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8400/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - vllm-service
+    volumes:
+      - ./scripts:/app/scripts
+    networks:
+      - agi-internal
+
+# 预留未来AGI扩展模块
+#  agi-causal-engine:
+#    image: ...
+#    ...
+
+networks:
+  agi-public:
+    driver: bridge
+  agi-internal:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  redis-data:
+  vllm-models:
+

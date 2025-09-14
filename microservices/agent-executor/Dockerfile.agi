@@ -1,0 +1,32 @@
+# Use an official Python runtime as a parent image
+FROM python:3.11-slim
+
+# Set the working directory in the container
+WORKDIR /app
+
+# --- Install Core Dependencies ---
+# Copy and install dependencies for the core event bus first
+COPY ./core/requirements.txt core_requirements.txt
+RUN pip install --no-cache-dir -r core_requirements.txt
+
+# --- Install Service-Specific Dependencies ---
+# Copy the dependencies file for this specific service
+COPY ./microservices/agi-qwen-service/requirements.txt .
+# Install any needed packages specified in requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install curl for health checks
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+# Copy the content of the local src directory to the working directory
+COPY . .
+
+# Set the PYTHONPATH to include the app's root directory
+# This allows for absolute imports from 'core' or other top-level modules
+ENV PYTHONPATH /app
+
+# Specify the command to run on container startup
+# Specify the command to run on container startup
+# Use Gunicorn as the production-ready WSGI server
+CMD ["gunicorn", "-c", "microservices/agent-executor/gunicorn.conf.py", "microservices.agent-executor.app:app"]
+
