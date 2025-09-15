@@ -1,0 +1,23 @@
+# Placeholder Dockerfile for agi-evolution-manager
+# Use an official Python runtime as a parent image
+FROM python:3.11-slim
+
+# Set the working directory in the container
+WORKDIR /app
+
+# --- Install Core Dependencies ---
+COPY ./core/requirements.txt core_requirements.txt
+RUN pip install --no-cache-dir -r core_requirements.txt
+
+# --- Install Service-Specific Dependencies ---
+COPY ./microservices/agi-evolution-manager/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the content of the local src directory to the working directory
+COPY . .
+
+# Set the PYTHONPATH to include the app's root directory
+ENV PYTHONPATH /app
+
+# Specify the command to run on container startup
+CMD ["flask", "--app", "microservices/agi-evolution-manager/app", "run", "--host=0.0.0.0", "--port=8300"]

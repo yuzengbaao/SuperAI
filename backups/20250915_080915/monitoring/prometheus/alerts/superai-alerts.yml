@@ -1,0 +1,297 @@
+groups:
+  - name: superai.system
+    rules:
+      # HTTP请求相关告警
+      - alert: HighHTTPErrorRate
+        expr: |
+          (
+            sum(rate(superai_requests_total{status_code=~"5.."}[5m])) by (service_name)
+            /
+            sum(rate(superai_requests_total[5m])) by (service_name)
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          service: "{{ $labels.service_name }}"
+        annotations:
+          summary: "SuperAI服务HTTP错误率过高"
+          description: "服务 {{ $labels.service_name }} 的HTTP 5xx错误率在过去5分钟内超过5%，当前值: {{ $value | humanizePercentage }}"
+
+      - alert: HighHTTPLatency
+        expr: |
+          histogram_quantile(0.95, rate(superai_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: "{{ $labels.service_name }}"
+        annotations:
+          summary: "SuperAI服务HTTP延迟过高"
+          description: "服务 {{ $labels.service_name }} 的HTTP请求P95延迟超过2秒，当前值: {{ $value }}s"
+
+      - alert: NoHTTPRequests
+        expr: |
+          sum(rate(superai_requests_total[5m])) by (service_name) == 0
+        for: 5m
+        labels:
+          severity: critical
+          service: "{{ $labels.service_name }}"
+        annotations:
+          summary: "SuperAI服务无HTTP请求"
+          description: "服务 {{ $labels.service_name }} 在过去5分钟内没有收到任何HTTP请求，可能服务已停止"
+
+  - name: superai.ai_models
+    rules:
+      # AI模型相关告警
+      - alert: HighAIModelErrorRate
+        expr: |
+          (
+            sum(rate(superai_ai_model_requests_total{status="error"}[5m])) by (model_name)
+            /
+            sum(rate(superai_ai_model_requests_total[5m])) by (model_name)
+          ) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          model: "{{ $labels.model_name }}"
+        annotations:
+          summary: "AI模型错误率过高"
+          description: "AI模型 {{ $labels.model_name }} 的错误率在过去5分钟内超过10%，当前值: {{ $value | humanizePercentage }}"
+
+      - alert: HighAIModelLatency
+        expr: |
+          histogram_quantile(0.95, rate(superai_ai_model_response_time_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          model: "{{ $labels.model_name }}"
+        annotations:
+          summary: "AI模型响应时间过长"
+          description: "AI模型 {{ $labels.model_name }} 的P95响应时间超过10秒，当前值: {{ $value }}s"
+
+      - alert: AIModelNotResponding
+        expr: |
+          sum(rate(superai_ai_model_requests_total[5m])) by (model_name) == 0
+        for: 10m
+        labels:
+          severity: critical
+          model: "{{ $labels.model_name }}"
+        annotations:
+          summary: "AI模型无响应"
+          description: "AI模型 {{ $labels.model_name }} 在过去10分钟内没有处理任何请求，可能模型服务已停止"
+
+      - alert: HighTokenUsage
+        expr: |
+          rate(superai_ai_model_tokens[5m]) > 1000
+        for: 5m
+        labels:
+          severity: warning
+          model: "{{ $labels.model_name }}"
+          token_type: "{{ $labels.token_type }}"
+        annotations:
+          summary: "AI模型Token使用量过高"
+          description: "AI模型 {{ $labels.model_name }} 的 {{ $labels.token_type }} Token使用率超过1000/5分钟，当前值: {{ $value }}"
+
+  - name: superai.tasks
+    rules:
+      # 任务处理相关告警
+      - alert: HighTaskFailureRate
+        expr: |
+          (
+            sum(rate(superai_tasks_total{status="error"}[5m])) by (task_type)
+            /
+            sum(rate(superai_tasks_total[5m])) by (task_type)
+          ) > 0.2
+        for: 3m
+        labels:
+          severity: warning
+          task_type: "{{ $labels.task_type }}"
+        annotations:
+          summary: "任务失败率过高"
+          description: "任务类型 {{ $labels.task_type }} 的失败率在过去5分钟内超过20%，当前值: {{ $value | humanizePercentage }}"
+
+      - alert: HighTaskProcessingTime
+        expr: |
+          histogram_quantile(0.95, rate(superai_task_duration_seconds_bucket[5m])) > 300
+        for: 5m
+        labels:
+          severity: warning
+          task_type: "{{ $labels.task_type }}"
+        annotations:
+          summary: "任务处理时间过长"
+          description: "任务类型 {{ $labels.task_type }} 的P95处理时间超过5分钟，当前值: {{ $value }}s"
+
+      - alert: TooManyActiveTasks
+        expr: |
+          sum(superai_active_tasks) by (task_type) > 50
+        for: 5m
+        labels:
+          severity: warning
+          task_type: "{{ $labels.task_type }}"
+        annotations:
+          summary: "活跃任务数过多"
+          description: "任务类型 {{ $labels.task_type }} 的活跃任务数超过50个，当前值: {{ $value }}，可能存在任务积压"
+
+      - alert: NoTaskProcessing
+        expr: |
+          sum(rate(superai_tasks_total[10m])) by (task_type) == 0
+        for: 10m
+        labels:
+          severity: critical
+          task_type: "{{ $labels.task_type }}"
+        annotations:
+          summary: "任务处理停止"
+          description: "任务类型 {{ $labels.task_type }} 在过去10分钟内没有处理任何任务，可能任务处理器已停止"
+
+  - name: superai.tools
+    rules:
+      # 工具执行相关告警
+      - alert: HighToolFailureRate
+        expr: |
+          (
+            sum(rate(superai_tool_executions_total{status="error"}[5m])) by (tool_name)
+            /
+            sum(rate(superai_tool_executions_total[5m])) by (tool_name)
+          ) > 0.15
+        for: 3m
+        labels:
+          severity: warning
+          tool: "{{ $labels.tool_name }}"
+        annotations:
+          summary: "工具执行失败率过高"
+          description: "工具 {{ $labels.tool_name }} 的失败率在过去5分钟内超过15%，当前值: {{ $value | humanizePercentage }}"
+
+      - alert: HighToolExecutionTime
+        expr: |
+          histogram_quantile(0.95, rate(superai_tool_execution_duration_seconds_bucket[5m])) > 30
+        for: 5m
+        labels:
+          severity: warning
+          tool: "{{ $labels.tool_name }}"
+        annotations:
+          summary: "工具执行时间过长"
+          description: "工具 {{ $labels.tool_name }} 的P95执行时间超过30秒，当前值: {{ $value }}s"
+
+  - name: superai.eventbus
+    rules:
+      # EventBus相关告警
+      - alert: HighEventBusLatency
+        expr: |
+          histogram_quantile(0.95, rate(superai_eventbus_message_duration_seconds_bucket[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          event_type: "{{ $labels.event_type }}"
+        annotations:
+          summary: "EventBus消息处理延迟过高"
+          description: "事件类型 {{ $labels.event_type }} 的P95处理延迟超过5秒，当前值: {{ $value }}s"
+
+      - alert: EventBusMessageBacklog
+        expr: |
+          (
+            sum(rate(superai_eventbus_messages_total{direction="sent"}[5m]))
+            -
+            sum(rate(superai_eventbus_messages_total{direction="received"}[5m]))
+          ) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "EventBus消息积压"
+          description: "EventBus发送消息数量超过接收消息数量，积压数量: {{ $value }}/5分钟"
+
+  - name: superai.infrastructure
+    rules:
+      # 基础设施相关告警
+      - alert: RedisConnectionLow
+        expr: |
+          superai_redis_connections < 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis连接数过低"
+          description: "Redis连接数低于5个，当前值: {{ $value }}，可能影响系统性能"
+
+      - alert: RedisConnectionHigh
+        expr: |
+          superai_redis_connections > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis连接数过高"
+          description: "Redis连接数超过100个，当前值: {{ $value }}，可能存在连接泄漏"
+
+      - alert: HighMemoryUsage
+        expr: |
+          (superai_memory_usage_bytes / (1024*1024*1024)) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: "{{ $labels.service_name }}"
+        annotations:
+          summary: "内存使用量过高"
+          description: "服务 {{ $labels.service_name }} 的内存使用量超过2GB，当前值: {{ $value | humanize1024 }}B"
+
+      - alert: HighCPUUsage
+        expr: |
+          superai_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: "{{ $labels.service_name }}"
+        annotations:
+          summary: "CPU使用率过高"
+          description: "服务 {{ $labels.service_name }} 的CPU使用率超过80%，当前值: {{ $value }}%"
+
+  - name: superai.health
+    rules:
+      # 健康状态相关告警
+      - alert: ServiceUnhealthy
+        expr: |
+          superai_health_status != 0
+        for: 1m
+        labels:
+          severity: critical
+          service: "{{ $labels.service_name }}"
+        annotations:
+          summary: "服务健康状态异常"
+          description: "服务 {{ $labels.service_name }} 的健康状态为异常，需要立即检查"
+
+      - alert: HealthCheckStale
+        expr: |
+          (time() - superai_last_health_check_timestamp) > 300
+        for: 1m
+        labels:
+          severity: warning
+          service: "{{ $labels.service_name }}"
+        annotations:
+          summary: "健康检查过期"
+          description: "服务 {{ $labels.service_name }} 的健康检查超过5分钟未更新，最后检查时间: {{ $value | humanizeTimestamp }}"
+
+  - name: superai.business
+    rules:
+      # 业务指标相关告警
+      - alert: LowRequestVolume
+        expr: |
+          sum(rate(superai_requests_total[10m])) < 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "请求量过低"
+          description: "系统整体请求量在过去10分钟内低于1 req/s，当前值: {{ $value }} req/s，可能存在问题"
+
+      - alert: HighOverallErrorRate
+        expr: |
+          (
+            sum(rate(superai_requests_total{status_code=~"[45].."}[5m]))
+            /
+            sum(rate(superai_requests_total[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "系统整体错误率过高"
+          description: "系统整体4xx/5xx错误率在过去5分钟内超过10%，当前值: {{ $value | humanizePercentage }}，需要立即处理"

@@ -1,0 +1,296 @@
+global:
+  # SMTP配置
+  smtp_smarthost: '${SMTP_HOST}:${SMTP_PORT}'
+  smtp_from: '${ALERT_EMAIL_FROM}'
+  smtp_auth_username: '${SMTP_USERNAME}'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  smtp_require_tls: true
+  
+  # 默认解析超时
+  resolve_timeout: 5m
+
+# 告警路由配置
+route:
+  # 默认分组
+  group_by: ['alertname', 'cluster', 'service']
+  
+  # 分组等待时间
+  group_wait: 10s
+  
+  # 分组间隔时间
+  group_interval: 10s
+  
+  # 重复告警间隔
+  repeat_interval: 1h
+  
+  # 默认接收器
+  receiver: 'default'
+  
+  # 子路由配置
+  routes:
+    # 严重告警路由
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 5s
+      group_interval: 5s
+      repeat_interval: 30m
+      continue: true
+    
+    # AI模型相关告警
+    - match_re:
+        alertname: '.*AI.*|.*Model.*'
+      receiver: 'ai-team'
+      group_by: ['alertname', 'model']
+      repeat_interval: 2h
+    
+    # 基础设施告警
+    - match_re:
+        alertname: '.*Memory.*|.*CPU.*|.*Redis.*'
+      receiver: 'infrastructure-team'
+      group_by: ['alertname', 'service']
+      repeat_interval: 4h
+    
+    # 业务逻辑告警
+    - match_re:
+        alertname: '.*Task.*|.*Tool.*|.*HTTP.*'
+      receiver: 'backend-team'
+      group_by: ['alertname', 'service']
+      repeat_interval: 2h
+    
+    # EventBus告警
+    - match_re:
+        alertname: '.*EventBus.*'
+      receiver: 'eventbus-team'
+      group_by: ['alertname', 'event_type']
+      repeat_interval: 1h
+    
+    # 健康检查告警
+    - match_re:
+        alertname: '.*Health.*|.*Unhealthy.*'
+      receiver: 'ops-team'
+      group_wait: 30s
+      repeat_interval: 15m
+
+# 抑制规则
+inhibit_rules:
+  # 如果服务不健康，抑制其他相关告警
+  - source_match:
+      alertname: 'ServiceUnhealthy'
+    target_match_re:
+      alertname: '.*HTTP.*|.*Task.*|.*Tool.*'
+    equal: ['service']
+  
+  # 如果整体错误率高，抑制单个服务错误率告警
+  - source_match:
+      alertname: 'HighOverallErrorRate'
+    target_match:
+      alertname: 'HighHTTPErrorRate'
+  
+  # 如果AI模型无响应，抑制相关性能告警
+  - source_match:
+      alertname: 'AIModelNotResponding'
+    target_match_re:
+      alertname: '.*AIModel.*'
+    equal: ['model']
+
+# 接收器配置
+receivers:
+  # 默认接收器
+  - name: 'default'
+    email_configs:
+      - to: '${ALERT_EMAIL_TO}'
+        subject: '[SuperAI] 告警通知 - {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          告警名称: {{ .Annotations.summary }}
+          告警描述: {{ .Annotations.description }}
+          告警级别: {{ .Labels.severity }}
+          开始时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          
+          标签信息:
+          {{ range .Labels.SortedPairs }}
+          - {{ .Name }}: {{ .Value }}
+          {{ end }}
+          {{ end }}
+          
+          Grafana仪表盘: http://grafana:3000/d/superai-system-overview
+        html: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <meta charset="UTF-8">
+              <title>SuperAI告警通知</title>
+              <style>
+                  body { font-family: Arial, sans-serif; margin: 20px; }
+                  .alert { border-left: 4px solid #f39c12; padding: 10px; margin: 10px 0; background-color: #fef9e7; }
+                  .critical { border-left-color: #e74c3c; background-color: #fdf2f2; }
+                  .warning { border-left-color: #f39c12; background-color: #fef9e7; }
+                  .info { border-left-color: #3498db; background-color: #ebf3fd; }
+                  .header { color: #2c3e50; border-bottom: 2px solid #ecf0f1; padding-bottom: 10px; }
+                  .label { background-color: #ecf0f1; padding: 2px 6px; border-radius: 3px; margin: 2px; display: inline-block; }
+                  .timestamp { color: #7f8c8d; font-size: 0.9em; }
+                  .description { margin: 10px 0; line-height: 1.4; }
+                  .footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #ecf0f1; color: #7f8c8d; }
+              </style>
+          </head>
+          <body>
+              <div class="header">
+                  <h2>🚨 SuperAI系统告警通知</h2>
+                  <p class="timestamp">通知时间: {{ now.Format "2006-01-02 15:04:05" }}</p>
+              </div>
+              
+              {{ range .Alerts }}
+              <div class="alert {{ .Labels.severity }}">
+                  <h3>{{ .Annotations.summary }}</h3>
+                  <div class="description">{{ .Annotations.description }}</div>
+                  <div class="timestamp">开始时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}</div>
+                  
+                  <div style="margin-top: 10px;">
+                      <strong>标签信息:</strong><br>
+                      {{ range .Labels.SortedPairs }}
+                      <span class="label">{{ .Name }}: {{ .Value }}</span>
+                      {{ end }}
+                  </div>
+              </div>
+              {{ end }}
+              
+              <div class="footer">
+                  <p>📊 <a href="http://grafana:3000/d/superai-system-overview">查看系统监控面板</a></p>
+                  <p>🤖 <a href="http://grafana:3000/d/superai-ai-services">查看AI服务监控面板</a></p>
+                  <p>⚙️ <a href="http://prometheus:9090/alerts">查看Prometheus告警</a></p>
+              </div>
+          </body>
+          </html>
+    
+    webhook_configs:
+      - url: '${ALERT_WEBHOOK_URL}'
+        send_resolved: true
+        http_config:
+          basic_auth:
+            username: '${WEBHOOK_USERNAME}'
+            password: '${WEBHOOK_PASSWORD}'
+        title: 'SuperAI告警 - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          告警: {{ .Annotations.summary }}
+          描述: {{ .Annotations.description }}
+          级别: {{ .Labels.severity }}
+          时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+  # 严重告警接收器
+  - name: 'critical-alerts'
+    email_configs:
+      - to: '${CRITICAL_ALERT_EMAIL}'
+        subject: '🚨 [CRITICAL] SuperAI严重告警 - {{ .GroupLabels.alertname }}'
+        body: |
+          ⚠️ 检测到严重告警，需要立即处理！
+          
+          {{ range .Alerts }}
+          告警名称: {{ .Annotations.summary }}
+          告警描述: {{ .Annotations.description }}
+          开始时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          
+          影响服务: {{ .Labels.service | default "未知" }}
+          {{ end }}
+          
+          请立即登录系统检查并处理此告警。
+    
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#critical-alerts'
+        title: '🚨 SuperAI严重告警'
+        text: |
+          {{ range .Alerts }}
+          *告警*: {{ .Annotations.summary }}
+          *描述*: {{ .Annotations.description }}
+          *级别*: {{ .Labels.severity }}
+          *时间*: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        send_resolved: true
+
+  # AI团队接收器
+  - name: 'ai-team'
+    email_configs:
+      - to: '${AI_TEAM_EMAIL}'
+        subject: '[SuperAI-AI] AI模型告警 - {{ .GroupLabels.alertname }}'
+        body: |
+          AI模型相关告警通知：
+          
+          {{ range .Alerts }}
+          模型名称: {{ .Labels.model | default "未知" }}
+          告警描述: {{ .Annotations.description }}
+          开始时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+  # 基础设施团队接收器
+  - name: 'infrastructure-team'
+    email_configs:
+      - to: '${INFRA_TEAM_EMAIL}'
+        subject: '[SuperAI-INFRA] 基础设施告警 - {{ .GroupLabels.alertname }}'
+        body: |
+          基础设施相关告警通知：
+          
+          {{ range .Alerts }}
+          服务名称: {{ .Labels.service | default "未知" }}
+          告警描述: {{ .Annotations.description }}
+          开始时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+  # 后端团队接收器
+  - name: 'backend-team'
+    email_configs:
+      - to: '${BACKEND_TEAM_EMAIL}'
+        subject: '[SuperAI-BACKEND] 后端服务告警 - {{ .GroupLabels.alertname }}'
+        body: |
+          后端服务相关告警通知：
+          
+          {{ range .Alerts }}
+          服务名称: {{ .Labels.service | default "未知" }}
+          任务类型: {{ .Labels.task_type | default "未知" }}
+          工具名称: {{ .Labels.tool | default "未知" }}
+          告警描述: {{ .Annotations.description }}
+          开始时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+  # EventBus团队接收器
+  - name: 'eventbus-team'
+    email_configs:
+      - to: '${EVENTBUS_TEAM_EMAIL}'
+        subject: '[SuperAI-EVENTBUS] EventBus告警 - {{ .GroupLabels.alertname }}'
+        body: |
+          EventBus相关告警通知：
+          
+          {{ range .Alerts }}
+          事件类型: {{ .Labels.event_type | default "未知" }}
+          告警描述: {{ .Annotations.description }}
+          开始时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+  # 运维团队接收器
+  - name: 'ops-team'
+    email_configs:
+      - to: '${OPS_TEAM_EMAIL}'
+        subject: '[SuperAI-OPS] 运维告警 - {{ .GroupLabels.alertname }}'
+        body: |
+          运维相关告警通知：
+          
+          {{ range .Alerts }}
+          服务名称: {{ .Labels.service | default "未知" }}
+          告警描述: {{ .Annotations.description }}
+          开始时间: {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+    
+    pagerduty_configs:
+      - routing_key: '${PAGERDUTY_ROUTING_KEY}'
+        description: 'SuperAI健康检查告警 - {{ .GroupLabels.alertname }}'
+        severity: '{{ .CommonLabels.severity }}'
+        details:
+          service: '{{ .CommonLabels.service }}'
+          alertname: '{{ .GroupLabels.alertname }}'
+          description: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+
+# 模板配置
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
