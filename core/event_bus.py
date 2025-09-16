@@ -10,6 +10,14 @@ import time
 from typing import Optional
 import fnmatch
 
+# 导入JSON格式化工具
+try:
+    from .json_formatter import StandardJSONFormatter, EventDataValidator
+except ImportError:
+    # 如果导入失败，使用标准JSON处理
+    StandardJSONFormatter = None
+    EventDataValidator = None
+
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s')
 
@@ -20,7 +28,7 @@ class EventBus:
     This forms the distributed "telepathy network" or "nervous system" of the AGI.
     """
     def __init__(self):
-        redis_host = os.environ.get('REDIS_HOST', 'localhost')
+        redis_host = os.environ.get('REDIS_HOST', 'agi-redis-lb')
         redis_port = int(os.environ.get('REDIS_PORT', 6379))
         
         try:
@@ -69,7 +77,19 @@ class EventBus:
         if data is None:
             data = {}
         
-        message = json.dumps(data)
+        # 使用标准化JSON格式
+        if StandardJSONFormatter and event_type == 'task.created':
+            try:
+                # 对任务事件进行格式化
+                formatted_data = StandardJSONFormatter.format_task_event(data)
+                message = StandardJSONFormatter.to_json_string(formatted_data)
+                logging.info(f"📢 Using standardized JSON format for task event")
+            except Exception as e:
+                logging.warning(f"⚠️ Failed to format task event, using standard JSON: {e}")
+                message = json.dumps(data)
+        else:
+            message = json.dumps(data)
+        
         self.redis_client.publish(event_type, message)
         logging.info(f"📢 Published event '{event_type}' to Redis.")
 
@@ -97,11 +117,25 @@ class EventBus:
             matching_patterns = [event_type]
             logging.info(f"🔍 Processing message: event_type='{event_type}', matching_patterns={matching_patterns}")
             
-        try:
-            data = json.loads(payload)
-        except (json.JSONDecodeError, TypeError):
-            logging.warning(f"⚠️ [EventBus] Could not decode JSON for event '{event_type}': {payload}")
-            return
+        # 使用增强的JSON解析
+        if StandardJSONFormatter:
+            data = StandardJSONFormatter.safe_json_loads(payload)
+            if data is None:
+                logging.warning(f"⚠️ [EventBus] Could not decode JSON for event '{event_type}': {payload}")
+                return
+        else:
+            try:
+                data = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                logging.warning(f"⚠️ [EventBus] Could not decode JSON for event '{event_type}': {payload}")
+                return
+        
+        # 验证事件数据格式
+        if EventDataValidator and event_type == 'task.created':
+            is_valid, error_msg = EventDataValidator.validate_task_event(data)
+            if not is_valid:
+                logging.warning(f"⚠️ [EventBus] Invalid task event data for '{event_type}': {error_msg}")
+                return
 
         with self._lock:
             # Collect listeners from all matching patterns

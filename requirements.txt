@@ -9,6 +9,10 @@ gunicorn==23.0.0
 # === 数据存储和通信 ===
 redis==4.5.5
 requests==2.31.0
+psycopg2-binary==2.9.9  # For PostgreSQL connection
+
+# === 配置管理 ===
+python-dotenv==1.0.1 # For loading .env files
 
 # === 外部API集成 ===
 tavily-python
