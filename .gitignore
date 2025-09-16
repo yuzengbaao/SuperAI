@@ -245,3 +245,4 @@ backup_*/
 *.tar.gz
 *.rar
 *.7z
+docker-secrets.env

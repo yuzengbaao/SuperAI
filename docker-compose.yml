@@ -1,7 +1,9 @@
-# ==============================================================================
+﻿# ==============================================================================
 # SuperAI - AGI Research Environment Orchestration
+# Version: 2.0 (Phoenix Architecture)
 #
-# 13大核心微服务，支持未来扩展，保留自定义参数与最佳实践
+# This Docker Compose file is configured to use environment variables from
+# .env (for non-sensitive data) and docker-secrets.env (for sensitive data).
 # ==============================================================================
 services:
   vllm-service:
@@ -32,10 +34,11 @@ services:
     container_name: agi-qwen-service
     ports:
       - "8201:8200"
+    env_file:
+      - .env
     environment:
       - SERVICE_NAME=agi-qwen-service
       - SERVICE_PORT=8200
-      - REDIS_HOST=agi-redis-lb
       - VLLM_API_URL=http://vllm-service:8000/v1/chat/completions
       - VLLM_MODEL=Qwen/Qwen1.5-1.8B-Chat
     healthcheck:
@@ -74,6 +77,11 @@ services:
       - agent-executor
     environment:
       - SERVICE_NAME=synergy-api-lb
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - agi-public
       - agi-internal
@@ -87,6 +95,11 @@ services:
       - "8200:80"
     environment:
       - SERVICE_NAME=learning-api-lb
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - agi-public
       - agi-internal
@@ -100,6 +113,11 @@ services:
       - "8105:80"
     environment:
       - SERVICE_NAME=health-check-proxy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks:
       - agi-public
       - agi-internal
@@ -119,8 +137,10 @@ services:
     container_name: agi-grafana
     ports:
       - "3000:3000"
+    env_file:
+      - docker-secrets.env
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
       - grafana-data:/var/lib/grafana
     depends_on:
@@ -133,6 +153,10 @@ services:
     container_name: agi-redis-lb
     ports:
       - "6379:6379"
+    env_file:
+      - .env
+      - docker-secrets.env
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     networks:
@@ -143,9 +167,10 @@ services:
       context: .
       dockerfile: ./microservices/agi-evolution-manager/Dockerfile.agi
     container_name: agi-evolution-manager
+    env_file:
+      - .env
     environment:
       - SERVICE_NAME=evolution-manager
-      - REDIS_HOST=agi-redis-lb
     networks:
       - agi-internal
 
@@ -154,6 +179,8 @@ services:
       context: ./microservices/agi-v4-enhanced
       dockerfile: Dockerfile.agi
     container_name: agi-v4-enhanced
+    env_file:
+      - .env
     environment:
       - SERVICE_NAME=v4-enhanced
     networks:
@@ -164,6 +191,8 @@ services:
       context: ./microservices/agi-test-validation
       dockerfile: Dockerfile
     container_name: agi-test-validation
+    env_file:
+      - .env
     environment:
       - SERVICE_NAME=test-validation
     networks:
@@ -174,6 +203,8 @@ services:
       context: ./microservices/agi-comprehensive-monitoring-enhanced
       dockerfile: Dockerfile
     container_name: agi-comprehensive-monitoring-enhanced
+    env_file:
+      - .env
     environment:
       - SERVICE_NAME=comprehensive-monitoring
     networks:
@@ -187,18 +218,15 @@ services:
     working_dir: /app/microservices/agent-planner
     ports:
       - "8300:8300"
+    env_file:
+      - .env
+      - docker-secrets.env
     environment:
       - SERVICE_NAME=agent-planner
       - SERVICE_PORT=8300
-      - REDIS_HOST=agi-redis-lb
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    secrets:
-      - redis_password
-      - secret_key
-      - jwt_secret
-      - tavily_api_key
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8300/health"]
       interval: 30s
@@ -216,21 +244,17 @@ services:
     container_name: agent-executor
     ports:
       - "8400:8400"
+    env_file:
+      - .env
+      - docker-secrets.env
     environment:
       - SERVICE_NAME=agent-executor
       - SERVICE_PORT=8400
-      - REDIS_HOST=agi-redis-lb
       - VLLM_API_URL=http://vllm-service:8000/v1/chat/completions
       - VLLM_MODEL=/models/Qwen1.5-1.8B-Chat
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - DEBUG=${DEBUG:-false}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    secrets:
-      - redis_password
-      - secret_key
-      - jwt_secret
-      - tavily_api_key
-      - openai_api_key
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8400/health"]
       interval: 30s
@@ -243,52 +267,138 @@ services:
     networks:
       - agi-internal
 
-# 预留未来AGI扩展模块
-#  agi-causal-engine:
-#    image: ...
-#    ...
+  # === AI Self-Cycle Evolution and Optimization Microservices ===
+  agi-bayesian-optimizer:
+    build:
+      context: .
+      dockerfile: ./microservices/agi-bayesian-optimizer/Dockerfile
+    container_name: agi-bayesian-optimizer
+    ports:
+      - "8500:8500"
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=agi-bayesian-optimizer
+      - SERVICE_PORT=8500
+      - OPTUNA_STORAGE_URL=sqlite:///data/optuna.db
+      - MAX_TRIALS=100
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8500/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - agi-redis-lb
+    volumes:
+      - bayesian-optimizer-data:/app/data
+      - ./scripts:/app/scripts
+    networks:
+      - agi-internal
+
+  agi-adaptive-optimizer:
+    build:
+      context: .
+      dockerfile: ./microservices/agi-adaptive-optimizer/Dockerfile
+    container_name: agi-adaptive-optimizer
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=agi-adaptive-optimizer
+      - SERVICE_PORT=8501
+      - HISTORY_SIZE=100
+      - ADAPTATION_WINDOW=10
+      - MIN_LR=1e-8
+      - MAX_LR=1.0
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - agi-redis-lb
+    volumes:
+      - adaptive-optimizer-data:/app/data
+      - ./scripts:/app/scripts
+    networks:
+      - agi-internal
+
+  agi-optimization-coordinator:
+    build:
+      context: .
+      dockerfile: ./microservices/agi-optimization-coordinator/Dockerfile
+    container_name: agi-optimization-coordinator
+    ports:
+      - "8502:8502"
+    env_file:
+      - .env
+    environment:
+      - SERVICE_NAME=agi-optimization-coordinator
+      - SERVICE_PORT=8502
+      - BAYESIAN_OPTIMIZER_URL=http://agi-bayesian-optimizer:8500
+      - ADAPTIVE_OPTIMIZER_URL=http://agi-adaptive-optimizer:8501
+      - OPTIMIZATION_TIMEOUT=3600
+      - MAX_CONCURRENT_TASKS=10
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8502/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - agi-bayesian-optimizer
+      - agi-adaptive-optimizer
+      - agi-redis-lb
+    volumes:
+      - optimization-coordinator-data:/app/data
+      - ./scripts:/app/scripts
+    networks:
+      - agi-internal
+      - agi-public
+
+  # === Core Infrastructure Services ===
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    env_file:
+      - .env
+      - docker-secrets.env
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    networks:
+      - agi-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
 
 volumes:
+  postgres_data:
+    driver: local
   prometheus-data:
   grafana-data:
   redis-data:
   vllm-models:
-
-# === Docker Secrets Configuration ===
-secrets:
-  redis_password:
-    external: true
-    name: REDIS_PASSWORD_SECRET
-  grafana_admin_password:
-    external: true
-    name: GRAFANA_ADMIN_PASSWORD_SECRET
-  tavily_api_key:
-    external: true
-    name: TAVILY_API_KEY_SECRET
-  openai_api_key:
-    external: true
-    name: OPENAI_API_KEY_SECRET
-  secret_key:
-    external: true
-    name: SECRET_KEY_SECRET
-  jwt_secret:
-    external: true
-    name: JWT_SECRET_SECRET
-  database_url:
-    external: true
-    name: DATABASE_URL_SECRET
-  alert_webhook_url:
-    external: true
-    name: ALERT_WEBHOOK_URL_SECRET
-  smtp_host:
-    external: true
-    name: SMTP_HOST_SECRET
-  smtp_username:
-    external: true
-    name: SMTP_USERNAME_SECRET
-  smtp_password:
-    external: true
-    name: SMTP_PASSWORD_SECRET
+  bayesian-optimizer-data:
+  adaptive-optimizer-data:
+  optimization-coordinator-data:
 
 # === Networks Configuration ===
 networks:
@@ -303,4 +413,7 @@ networks:
     ipam:
       config:
         - subnet: 172.21.0.0/24
+
+
+
 
